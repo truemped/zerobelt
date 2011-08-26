@@ -46,9 +46,6 @@ Example usage::
         http_client.fetch(url, callback)
     ioloop.start()
 '''
-
-from __future__ import with_statement
-
 import contextlib
 import functools
 import logging
@@ -63,6 +60,8 @@ class _State(threading.local):
     def __init__(self):
         self.contexts = ()
 _state = _State()
+
+__all__ = ['StackContext', 'NullContext', 'wrap']
 
 @contextlib.contextmanager
 def StackContext(context_factory):
