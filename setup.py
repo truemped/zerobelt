@@ -45,6 +45,12 @@ setup(
     tests_require = tests_require,
     extras_require = {
         'test': tests_require,
+        'pyzmq': [
+            'pyzmq>=2.1.7',
+        ],
+        'pyzmq-ctypes': [
+            'pyzmq-ctypes>=2.1.3',
+        ]
     },
     entry_points = {
         'console_scripts' : [
