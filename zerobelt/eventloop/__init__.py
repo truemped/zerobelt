@@ -16,12 +16,16 @@
 # limitations under the License.
 #
 #
-import .ioloop
-import .stack_context
+from .ioloop import *
+from .stack_context import *
 
-def install():
+def install_ioloop():
     """Install the custom eventloop as the tornado eventloop.
     """
     import tornado.ioloop
-    from .ioloop import IOLoop
     tornado.ioloop.IOLoop = IOLoop
+
+    import tornado.stack_context
+    tornado.stack_context.StackContext = StackContext
+    tornado.stack_context.NullContext = NullContext
+    tornado.stack_context.wrap = wrap
