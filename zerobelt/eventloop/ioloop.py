@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #
 # Copyright 2009 Facebook
 #
@@ -14,28 +13,18 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-"""An I/O event loop for non-blocking sockets.
-
-Typical applications will use a single `IOLoop` object, in the
-`IOLoop.instance` singleton.  The `IOLoop.start` method should usually
-be called at the end of the ``main()`` function.  Atypical applications may
-use more than one `IOLoop`, such as one `IOLoop` per thread, or per `unittest`
-case.
-
-In addition to I/O events, the `IOLoop` can also schedule time-based events.
-`IOLoop.add_timeout` is a non-blocking alternative to `time.sleep`.
-"""
+"""A level-triggered I/O loop for non-blocking sockets."""
 
 import errno
-import heapq
+import bisect
 import os
+import sys
 import logging
-import select
 import time
 import traceback
 
-from tornado import stack_context
-from tornado.escape import utf8
+from zerobelt.eventloop import stack_context
+from zerobelt.strtypes import asbytes
 
 try:
     import signal
@@ -46,19 +35,24 @@ try:
     import fcntl
 except ImportError:
     if os.name == 'nt':
-        from tornado import win32_support
-        from tornado import win32_support as fcntl
+        from zmq.eventloop import win32_support
+        fcntl = win32_support
     else:
         raise
+
+from zmq import (
+    Poller,
+    POLLIN, POLLOUT, POLLERR,
+    ZMQError, ETERM
+)
 
 class IOLoop(object):
     """A level-triggered I/O loop.
 
-    We use epoll (Linux) or kqueue (BSD and Mac OS X; requires python
-    2.6+) if they are available, or else we fall back on select(). If
-    you are implementing a system that needs to handle thousands of
-    simultaneous connections, you should use a system that supports either
-    epoll or queue.
+    We use epoll if it is available, or else we fall back on select(). If
+    you are implementing a system that needs to handle 1000s of simultaneous
+    connections, you should use Linux and either compile our epoll module or
+    use Python 2.6+ to get epoll support.
 
     Example usage for a simple TCP server::
 
@@ -90,29 +84,19 @@ class IOLoop(object):
         io_loop.start()
 
     """
-    # Constants from the epoll module
-    _EPOLLIN = 0x001
-    _EPOLLPRI = 0x002
-    _EPOLLOUT = 0x004
-    _EPOLLERR = 0x008
-    _EPOLLHUP = 0x010
-    _EPOLLRDHUP = 0x2000
-    _EPOLLONESHOT = (1 << 30)
-    _EPOLLET = (1 << 31)
-
-    # Our events map exactly to the epoll events
+    # Use the zmq events masks
     NONE = 0
-    READ = _EPOLLIN
-    WRITE = _EPOLLOUT
-    ERROR = _EPOLLERR | _EPOLLHUP | _EPOLLRDHUP
+    READ = POLLIN
+    WRITE = POLLOUT
+    ERROR = POLLERR
 
     def __init__(self, impl=None):
-        self._impl = impl or _poll()
+        self._impl = impl or Poller()
         if hasattr(self._impl, 'fileno'):
             self._set_close_exec(self._impl.fileno())
         self._handlers = {}
         self._events = {}
-        self._callbacks = []
+        self._callbacks = set()
         self._timeouts = []
         self._running = False
         self._stopped = False
@@ -223,31 +207,31 @@ class IOLoop(object):
         self._running = True
         while True:
             # Never use an infinite timeout here - it can stall epoll
-            poll_timeout = 0.2
+            # In pyzmq, we need to multiply the timeout by 1000 because
+            # the poll interface in pyzmq that is used here takes the timeout
+            # in ms. The value of 0.2 that exists in tornado is in seconds.
+            poll_timeout = 0.2*1000
 
             # Prevent IO event starvation by delaying new callbacks
             # to the next iteration of the event loop.
-            callbacks = self._callbacks
-            self._callbacks = []
+            callbacks = list(self._callbacks)
             for callback in callbacks:
-                self._run_callback(callback)
+                # A callback can add or remove other callbacks
+                if callback in self._callbacks:
+                    self._callbacks.remove(callback)
+                    self._run_callback(callback)
 
             if self._callbacks:
                 poll_timeout = 0.0
 
             if self._timeouts:
                 now = time.time()
-                while self._timeouts:
-                    if self._timeouts[0].callback is None:
-                        # the timeout was cancelled
-                        heapq.heappop(self._timeouts)
-                    elif self._timeouts[0].deadline <= now:
-                        timeout = heapq.heappop(self._timeouts)
-                        self._run_callback(timeout.callback)
-                    else:
-                        milliseconds = self._timeouts[0].deadline - now
-                        poll_timeout = min(milliseconds, poll_timeout)
-                        break
+                while self._timeouts and self._timeouts[0].deadline <= now:
+                    timeout = self._timeouts.pop(0)
+                    self._run_callback(timeout.callback)
+                if self._timeouts:
+                    milliseconds = self._timeouts[0].deadline - now
+                    poll_timeout = min(1000*milliseconds, poll_timeout)
 
             if not self._running:
                 break
@@ -259,7 +243,17 @@ class IOLoop(object):
 
             try:
                 event_pairs = self._impl.poll(poll_timeout)
-            except Exception, e:
+            except ZMQError:
+                e = sys.exc_info()[1]
+                if e.errno == ETERM:
+                    # This happens when the zmq Context is closed; we should just exit.
+                    self._running = False
+                    self._stopped = True
+                    break
+                else:
+                    raise
+            except Exception:
+                e = sys.exc_info()[1]
                 # Depending on python version and IOLoop implementation,
                 # different exception types may be thrown and there are
                 # two ways EINTR might be signaled:
@@ -268,6 +262,7 @@ class IOLoop(object):
                 if (getattr(e, 'errno', None) == errno.EINTR or
                     (isinstance(getattr(e, 'args', None), tuple) and
                      len(e.args) == 2 and e.args[0] == errno.EINTR)):
+                    logging.warning("Interrupted system call", exc_info=1)
                     continue
                 else:
                     raise
@@ -326,12 +321,9 @@ class IOLoop(object):
         return self._running
 
     def add_timeout(self, deadline, callback):
-        """Calls the given callback at the time deadline from the I/O loop.
-
-        Returns a handle that may be passed to remove_timeout to cancel.
-        """
+        """Calls the given callback at the time deadline from the I/O loop."""
         timeout = _Timeout(deadline, stack_context.wrap(callback))
-        heapq.heappush(self._timeouts, timeout)
+        bisect.insort(self._timeouts, timeout)
         return timeout
 
     def remove_timeout(self, timeout):
@@ -339,29 +331,20 @@ class IOLoop(object):
 
         The argument is a handle as returned by add_timeout.
         """
-        # Removing from a heap is complicated, so just leave the defunct
-        # timeout object in the queue (see discussion in 
-        # http://docs.python.org/library/heapq.html).
-        # If this turns out to be a problem, we could add a garbage
-        # collection pass whenever there are too many dead timeouts.
-        timeout.callback = None
+        self._timeouts.remove(timeout)
 
     def add_callback(self, callback):
         """Calls the given callback on the next I/O loop iteration.
 
-        It is safe to call this method from any thread at any time.
-        Note that this is the *only* method in IOLoop that makes this
-        guarantee; all other interaction with the IOLoop must be done
-        from that IOLoop's thread.  add_callback() may be used to transfer
-        control from other threads to the IOLoop's thread.
+        This is thread safe because set.add is an atomic operation. The rest
+        of the API is not thread safe.
         """
-        if not self._callbacks:
-            self._wake()
-        self._callbacks.append(stack_context.wrap(callback))
+        self._callbacks.add(stack_context.wrap(callback))
+        self._wake()
 
     def _wake(self):
         try:
-            self._waker_writer.write(utf8("x"))
+            self._waker_writer.write(asbytes("x"))
         except IOError:
             pass
 
@@ -386,10 +369,10 @@ class IOLoop(object):
         logging.error("Exception in callback %r", callback, exc_info=True)
 
     def _read_waker(self, fd, events):
+        s=None
         try:
-            while True:
-                result = self._waker_reader.read()
-                if not result: break
+            while True and s is None:
+                s = self._waker_reader.read()
         except IOError:
             pass
 
@@ -412,18 +395,13 @@ class _Timeout(object):
         self.deadline = deadline
         self.callback = callback
 
-    # Comparison methods to sort by deadline, with object id as a tiebreaker
-    # to guarantee a consistent ordering.  The heapq module uses __le__
-    # in python2.5, and __lt__ in 2.6+ (sort() and most other comparisons
-    # use __lt__).  
+    def __cmp__(self, other):
+        return cmp((self.deadline, id(self.callback)),
+                   (other.deadline, id(other.callback)))
+
     def __lt__(self, other):
-        return ((self.deadline, id(self)) <
-                (other.deadline, id(other)))
-
-    def __le__(self, other):
-        return ((self.deadline, id(self)) <=
-                (other.deadline, id(other)))
-
+        return (self.deadline, id(self.callback)) < \
+                   (other.deadline, id(other.callback))
 
 class PeriodicCallback(object):
     """Schedules the given callback to be called periodically.
@@ -459,147 +437,12 @@ class PeriodicCallback(object):
         if self._running:
             self.start()
 
+class DelayedCallback(PeriodicCallback):
+    """Schedules the given callback to be called once.
 
-class _EPoll(object):
-    """An epoll-based event loop using our C module for Python 2.5 systems"""
-    _EPOLL_CTL_ADD = 1
-    _EPOLL_CTL_DEL = 2
-    _EPOLL_CTL_MOD = 3
+    The callback is called after the object is created by callback_time milliseconds.
+    """
 
-    def __init__(self):
-        self._epoll_fd = epoll.epoll_create()
-
-    def fileno(self):
-        return self._epoll_fd
-
-    def register(self, fd, events):
-        epoll.epoll_ctl(self._epoll_fd, self._EPOLL_CTL_ADD, fd, events)
-
-    def modify(self, fd, events):
-        epoll.epoll_ctl(self._epoll_fd, self._EPOLL_CTL_MOD, fd, events)
-
-    def unregister(self, fd):
-        epoll.epoll_ctl(self._epoll_fd, self._EPOLL_CTL_DEL, fd, 0)
-
-    def poll(self, timeout):
-        return epoll.epoll_wait(self._epoll_fd, int(timeout * 1000))
-
-
-class _KQueue(object):
-    """A kqueue-based event loop for BSD/Mac systems."""
-    def __init__(self):
-        self._kqueue = select.kqueue()
-        self._active = {}
-
-    def fileno(self):
-        return self._kqueue.fileno()
-
-    def register(self, fd, events):
-        self._control(fd, events, select.KQ_EV_ADD)
-        self._active[fd] = events
-
-    def modify(self, fd, events):
-        self.unregister(fd)
-        self.register(fd, events)
-
-    def unregister(self, fd):
-        events = self._active.pop(fd)
-        self._control(fd, events, select.KQ_EV_DELETE)
-
-    def _control(self, fd, events, flags):
-        kevents = []
-        if events & IOLoop.WRITE:
-            kevents.append(select.kevent(
-                    fd, filter=select.KQ_FILTER_WRITE, flags=flags))
-        if events & IOLoop.READ or not kevents:
-            # Always read when there is not a write
-            kevents.append(select.kevent(
-                    fd, filter=select.KQ_FILTER_READ, flags=flags))
-        # Even though control() takes a list, it seems to return EINVAL
-        # on Mac OS X (10.6) when there is more than one event in the list.
-        for kevent in kevents:
-            self._kqueue.control([kevent], 0)
-
-    def poll(self, timeout):
-        kevents = self._kqueue.control(None, 1000, timeout)
-        events = {}
-        for kevent in kevents:
-            fd = kevent.ident
-            if kevent.filter == select.KQ_FILTER_READ:
-                events[fd] = events.get(fd, 0) | IOLoop.READ
-            if kevent.filter == select.KQ_FILTER_WRITE:
-                if kevent.flags & select.KQ_EV_EOF:
-                    # If an asynchronous connection is refused, kqueue
-                    # returns a write event with the EOF flag set.
-                    # Turn this into an error for consistency with the
-                    # other IOLoop implementations.
-                    # Note that for read events, EOF may be returned before
-                    # all data has been consumed from the socket buffer,
-                    # so we only check for EOF on write events.
-                    events[fd] = IOLoop.ERROR
-                else:
-                    events[fd] = events.get(fd, 0) | IOLoop.WRITE
-            if kevent.flags & select.KQ_EV_ERROR:
-                events[fd] = events.get(fd, 0) | IOLoop.ERROR
-        return events.items()
-
-
-class _Select(object):
-    """A simple, select()-based IOLoop implementation for non-Linux systems"""
-    def __init__(self):
-        self.read_fds = set()
-        self.write_fds = set()
-        self.error_fds = set()
-        self.fd_sets = (self.read_fds, self.write_fds, self.error_fds)
-
-    def register(self, fd, events):
-        if events & IOLoop.READ: self.read_fds.add(fd)
-        if events & IOLoop.WRITE: self.write_fds.add(fd)
-        if events & IOLoop.ERROR:
-            self.error_fds.add(fd)
-            # Closed connections are reported as errors by epoll and kqueue,
-            # but as zero-byte reads by select, so when errors are requested
-            # we need to listen for both read and error.
-            self.read_fds.add(fd)
-
-    def modify(self, fd, events):
-        self.unregister(fd)
-        self.register(fd, events)
-
-    def unregister(self, fd):
-        self.read_fds.discard(fd)
-        self.write_fds.discard(fd)
-        self.error_fds.discard(fd)
-
-    def poll(self, timeout):
-        readable, writeable, errors = select.select(
-            self.read_fds, self.write_fds, self.error_fds, timeout)
-        events = {}
-        for fd in readable:
-            events[fd] = events.get(fd, 0) | IOLoop.READ
-        for fd in writeable:
-            events[fd] = events.get(fd, 0) | IOLoop.WRITE
-        for fd in errors:
-            events[fd] = events.get(fd, 0) | IOLoop.ERROR
-        return events.items()
-
-
-# Choose a poll implementation. Use epoll if it is available, fall back to
-# select() for non-Linux platforms
-if hasattr(select, "epoll"):
-    # Python 2.6+ on Linux
-    _poll = select.epoll
-elif hasattr(select, "kqueue"):
-    # Python 2.6+ on BSD or Mac
-    _poll = _KQueue
-else:
-    try:
-        # Linux systems with our C module installed
-        import epoll
-        _poll = _EPoll
-    except:
-        # All other systems
-        import sys
-        if "linux" in sys.platform:
-            logging.warning("epoll module not found; using select()")
-        _poll = _Select
+    def _run(self):
+        PeriodicCallback._run(self)
+        self.stop()
