@@ -39,8 +39,6 @@ setup(
     packages = find_packages(),
     include_package_data = True,
     install_requires = [
-        'tornado>=2.0',
-        'pyzmq>=2.1.7',
     ],
     tests_require = tests_require,
     extras_require = {
