@@ -34,7 +34,7 @@ def time_callback(callback):
 
 
 @Vows.batch
-class WithAnEventloopTest(TornadoContext):
+class WithAnEventloop(TornadoContext):
 
     class DelayedCallbacks(TornadoContext):
 

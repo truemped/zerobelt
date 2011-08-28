@@ -1,7 +1,7 @@
 #
 # Copyright (c) 2011 Daniel Truemper truemped@googlemail.com
 #
-# __init__.py 26-Aug-2011
+# jsonapi_vows.py 26-Aug-2011
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,17 +16,27 @@
 # limitations under the License.
 #
 #
-from .ioloop import *
-from .stack_context import *
-from .zmqstream import *
+from pyvows import Vows, expect
+from tornado_pyvows import TornadoContext
 
-def install_ioloop():
-    """Install the custom eventloop as the tornado eventloop.
-    """
-    import tornado.ioloop
-    tornado.ioloop.IOLoop = IOLoop
 
-    import tornado.stack_context
-    tornado.stack_context.StackContext = StackContext
-    tornado.stack_context.NullContext = NullContext
-    tornado.stack_context.wrap = wrap
+from zerobelt import jsonapi
+
+@Vows.batch
+class WithTheJsonApi(Vows.Context):
+
+    class Serialization(Vows.Context):
+
+        def topic(self):
+            return jsonapi.dumps({'test': 'this'})
+
+        def shouldBeWorking(self, topic):
+            expect(topic).to_equal('{"test":"this"}')
+
+    class Deserialization(Vows.Context):
+
+        def topic(self):
+            return jsonapi.loads('{"test":"this"}')
+
+        def shouldBeWorking(self, topic):
+            expect(topic).to_equal({'test': 'this'})
