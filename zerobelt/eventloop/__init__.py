@@ -18,6 +18,7 @@
 #
 from .ioloop import *
 from .stack_context import *
+from .zmqstream import *
 
 def install_ioloop():
     """Install the custom eventloop as the tornado eventloop.
