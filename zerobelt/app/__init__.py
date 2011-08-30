@@ -16,6 +16,61 @@
 # limitations under the License.
 #
 #
+"""
+This is a little application `Framework` for use with `Tornado` and `ZeroMQ`.
+
+The idea is pretty simple: DRY.
+
+So instead of writing the same socket creation code over and over again
+throughout your application, you may simply create classes that inherit from
+`BaseZmqHandler` and use the `Bind` or `Connect` decorator like so::
+
+    from zerobelt.app import BaseZmqHandler, Bind, Connect, ZmqContext
+    from zerobelt.eventloop import IOLoop
+
+    @Bind('inproc://tmp', zmq.PUB, name='publisher')
+    class MyPublisher(BaseZmqHandler):
+
+        def __init__(self, context=None, io_loop=None):
+            super(MyPublisher, self).__init__(context=context, io_loop=io_loop)
+
+            self._context = context or ZmqContext.instance()
+            self._io_loop = io_loop or IOLoop.instance()
+
+            self.pub = self.get_stream('publisher')
+
+        def important_method_doing_stuff(self):
+            # important stuff
+            self.pub.send('done')
+
+    @Connect('inproc://tmp', zmq.SUB, name='subscriber',
+        opts=[(zmq.SUBSCRIBE, '')], on_recv='log_everything')
+    class MySubscriber(BaseZmqHandler):
+
+        def __init__(self, context=None, io_loop=None):
+            super(MySubscriber, self).__init__(context=context, io_loop=io_loop)
+
+            self._context = context or ZmqContext.instance()
+            self._io_loop = io_loop or IOLoop.instance()
+
+        def log_everything(self, msg):
+            log.info(msg)
+
+The sockets and corresponding `ZMQStreams` are created in the `BaseZmqHandler`.
+Both decorators allow to set the callbacks for the stream, namely `on_recv`,
+`on_err` and `on_send`.
+
+Creating the sockets, binding and connecting them leaves us with the simple
+lines::
+
+    if __name__ == '__main__':
+        pub = MyPublisher()
+        sub = MySubscriber()
+
+        pub.important_method_doing_stuff()
+
+        IOLoop.instance().start()
+"""
 import zmq
 
 from .decorators import *
