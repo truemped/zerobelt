@@ -20,15 +20,30 @@ import zmq
 
 
 class ZmqContext(object):
+    """
+    A singleton for the `zmq.Context`.
+    """
 
     context = None
+    """
+    The class level variable storing the context.
+    """
 
     @classmethod
     def initialize(cls, io_threads):
+        """
+        Initialize the context.
+
+        This method really creates a new `zmq.Context`, so use with care!
+        """
         cls.context = zmq.Context(io_threads)
 
     @classmethod
     def instance(cls, io_threads=1):
+        """
+        Return the `zmq.Context` and create it, if it has not been created
+        before.
+        """
         if not cls.context:
             ZmqContext.initialize(io_threads)
         return cls.context
