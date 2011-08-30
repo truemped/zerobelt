@@ -99,12 +99,12 @@ class ZmqHandlers(TornadoContext):
 
         def gettingTheSocketShouldWork(self, topic):
             pub, _ = topic
-            sock, stream = pub.sockets['TestPublisher(inproc://test, 1)']
+            sock = pub.sockets['TestPublisher(inproc://test, 1)']
             expect(pub.get_socket('TestPublisher(inproc://test, 1)')).to_equal(sock)
 
         def gettingTheStreamShouldWork(self, topic):
             pub, _ = topic
-            sock, stream = pub.sockets['TestPublisher(inproc://test, 1)']
+            stream = pub.streams['TestPublisher(inproc://test, 1)']
             expect(pub.get_stream('TestPublisher(inproc://test, 1)')).to_equal(stream)
 
     class TheOnSendCallback(TornadoContext):

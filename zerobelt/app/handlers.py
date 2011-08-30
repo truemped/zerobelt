@@ -59,18 +59,17 @@ class BaseZmqHandler(object):
             if sockdef.on_err_name:
                 stream.on_err(getattr(self, sockdef.on_err_name))
 
-            self.sockets[sockname] = (sock, stream)
+            self.sockets[sockname] = sock
+            self.streams[sockname] = stream
 
     def get_socket(self, name):
         """
         Return the socket with the given name.
         """
-        sock, stream = self.sockets[name]
-        return sock
+        return self.sockets[name]
 
     def get_stream(self, name):
         """
         Return the `ZMQStream` with the given name.
         """
-        sock, stream = self.sockets[name]
-        return stream
+        return self.streams[name]

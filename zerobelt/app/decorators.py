@@ -66,11 +66,9 @@ class BaseDecorator(object):
     def __call__(self, handler):
         """
         """
-        if not hasattr(handler, 'socket_definitions'):
-            setattr(handler, 'socket_definitions', {})
-
-        if not hasattr(handler, 'sockets'):
-            setattr(handler, 'sockets', {})
+        for attribute in ['socket_definitions', 'sockets', 'streams']:
+            if not hasattr(handler, attribute):
+                setattr(handler, attribute, {})
 
         if not self.sockname:
             self.sockname = "%s(%s, %s)" % (handler.__name__, self.sockspec,
