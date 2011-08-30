@@ -31,14 +31,14 @@ class TestPublisher(BaseZmqHandler):
         super(TestPublisher, self).__init__(context=context, io_loop=io_loop)
 
 
-@Bind('inproc://test1', zmq.PUB, 'testpublisher1')
+@Bind('inproc://test1', zmq.PUB, name='testpublisher1')
 class TestPublisher1(BaseZmqHandler):
 
     def __init__(self, context=None, io_loop=None):
         super(TestPublisher1, self).__init__(context=context, io_loop=io_loop)
 
 
-@Bind('inproc://test2', zmq.PUB, 'testpublisher2', on_send='print_send')
+@Bind('inproc://test2', zmq.PUB, name='testpublisher2', on_send='print_send')
 class TestPublisher2(BaseZmqHandler):
 
     def __init__(self, context=None, io_loop=None):
@@ -48,14 +48,14 @@ class TestPublisher2(BaseZmqHandler):
         print msg
 
 
-@Bind('inproc://test3', zmq.PUB, 'testpublisher3')
+@Bind('inproc://test3', zmq.PUB, name='testpublisher3')
 class TestPublisher3(BaseZmqHandler):
 
     def __init__(self, context=None, io_loop=None):
         super(TestPublisher3, self).__init__(context=context, io_loop=io_loop)
 
 
-@Connect('inproc://test3', zmq.SUB, 'testsub', on_recv='print_msg',
+@Connect('inproc://test3', zmq.SUB, name='testsub', on_recv='print_msg',
         opts=[(zmq.SUBSCRIBE, '')])
 class TestSubscriber(BaseZmqHandler):
 
