@@ -74,7 +74,7 @@ lines::
 import zmq
 
 from .decorators import *
-from .handlers import *
+from .basehandler import *
 
 
 class ZmqContext(object):
