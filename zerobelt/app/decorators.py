@@ -49,6 +49,13 @@ __all__ = ['Bind', 'Connect']
 
 class BaseDecorator(object):
 
+    sockets = []
+    """
+    A list of decorated handlers.
+
+    When shutting down each socket in the handler will be closed.
+    """
+
     def __init__(self, sockspec, socktype, name=None, on_recv=None,
             on_send=None, on_err=None, opts=[]):
         """
@@ -75,7 +82,17 @@ class BaseDecorator(object):
                     self.socktype)
 
         handler.socket_definitions[self.sockname] = self
+        if handler not in BaseDecorator.sockets:
+            BaseDecorator.sockets.append(handler)
+
         return handler
+
+    @classmethod
+    def get_all_handlers(cls):
+        """
+        Return all handlers that have been decorated.
+        """
+        return cls.sockets
 
 
 class Bind(BaseDecorator):

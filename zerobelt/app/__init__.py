@@ -105,3 +105,21 @@ class ZmqContext(object):
         if not cls.context:
             ZmqContext.initialize(io_threads)
         return cls.context
+
+    @classmethod
+    def term(cls):
+        """
+        Terminate the `zmq.Context`.
+
+        First we need to check if all sockets have been closed.
+        """
+        sockets = []
+        map(sockets.extend, BaseDecorator.sockets)
+
+        for sock in sockets:
+            print 'closing %s' % sock
+            sock.setsockopt(zmq.LINGER, 0)
+            sock.close()
+
+        print 'terminating the context'
+        ZmqContext.instance().term()
