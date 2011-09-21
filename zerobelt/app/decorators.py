@@ -17,27 +17,7 @@
 #
 #
 """
-Idea:
-
-    @Bind('inproc://test', zmq.PUB, 'publisher', on_recv='on_recv',
-            on_err='on_err', on_send='on_send')
-    class ExampleSubscriber(BaseZmqHandler):
-
-        def on_recv(self, msg):
-            pass
-
-        def on_err(self, msg):
-            pass
-
-        def on_send(self, msg):
-            pass
-
-    @Connect('inproc://test', zmq.SUB, 'subscriber', on_recv='print_message',
-            opts=[(zmq.SUBSCRIBE, '')])
-    class ExamplePublisher(BaseZmqHandler):
-
-        def print_message(self, msg):
-            print msg
+The decorators for defining the `ZeroMQ` sockets that should be created.
 """
 import zmq
 

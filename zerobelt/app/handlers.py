@@ -16,15 +16,26 @@
 # limitations under the License.
 #
 #
+"""
+The `BaseZmqHandler` is the base for all `ZeroMQ` handlers. From this handler
+we will implement the different patterns shown in the `ZeroMQ Guide`.
+"""
 from zerobelt.eventloop import IOLoop, ZMQStream
 from .app import ZmqContext
 from .decorators import *
 
 
 class BaseZmqHandler(object):
+    """
+    Base class for all `ZeroMQ` handlers. Subclass this handler and use the
+    `Bind` or `Connect` decorator.
+    """
 
     def __init__(self, context=None, io_loop=None):
         """
+        Initialize the sockets and streams. The `socket_definitions`, `sockets`
+        and `streams` variables are being created in the subclass by the
+        decorator.
         """
         self.context = context or ZmqContext.instance()
         self.io_loop = io_loop or IOLoop.instance()
