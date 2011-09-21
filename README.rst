@@ -4,7 +4,7 @@
 Zero Belt
 =========
 
-This will be my small collection of useful stuf for ZeroMQ with Python.
+This will be my small collection of useful stuff for ZeroMQ with Python.
 
 
 Contents
