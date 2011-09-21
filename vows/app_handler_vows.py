@@ -72,6 +72,7 @@ class ZmqHandlers(TornadoContext):
     def topic(self):
 
         ctx = ZmqContext.instance()
+        return ctx
 
     class ShouldGetInitialized(TornadoContext):
 
